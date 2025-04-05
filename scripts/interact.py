@@ -2,6 +2,7 @@ from web3 import Web3
 import json
 import os
 from dotenv import load_dotenv
+from ipfs_requests import store_post_content, retrieve_post_content
 
 # Load environment variables
 load_dotenv()
@@ -63,11 +64,18 @@ def create_post(title, content, is_news=False, user_address=None, account_index=
     else:
         from_account = default_account
     
+    # Store content on IPFS and get content hash
+    content_hash = store_post_content(title, content, from_account)
+    
+    if not content_hash:
+        raise Exception("Failed to store content on IPFS")
+    
     # Log which account we're using
     print(f"Creating post from account: {from_account}")
+    print(f"Content stored on IPFS with hash: {content_hash}")
     
-    # Create post transaction
-    tx_hash = contract.functions.createPost(title, content, is_news).transact({'from': from_account})
+    # Create post transaction with IPFS hash
+    tx_hash = contract.functions.createPost(title, content_hash, is_news).transact({'from': from_account})
     
     # Wait for confirmation
     tx_receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
@@ -151,12 +159,24 @@ def get_all_posts():
     # Get all posts
     for i in range(1, post_count + 1):
         post = contract.functions.posts(i).call()
+        # Get content from IPFS
+        try:
+            ipfs_data = retrieve_post_content(post[3])  # post[3] is contentHash
+            if ipfs_data:
+                content = ipfs_data.get('content', 'Content could not be loaded from IPFS')
+            else:
+                content = "Content could not be loaded from IPFS"
+        except Exception as e:
+            print(f"Error retrieving content for post {i}: {str(e)}")
+            content = "Error loading content from IPFS"
+            
         # Format post data
         post_data = {
             'id': post[0],
             'author': post[1],
             'title': post[2],
-            'content': post[3],
+            'content': content,
+            'ipfs_hash': post[3],
             'timestamp': post[4],
             'upvotes': post[5],
             'downvotes': post[6],
@@ -191,12 +211,24 @@ def get_post(post_id):
     # Get post data
     post = contract.functions.posts(post_id).call()
     
+    # Get content from IPFS
+    try:
+        ipfs_data = retrieve_post_content(post[3])  # post[3] is contentHash
+        if ipfs_data:
+            content = ipfs_data.get('content', 'Content could not be loaded from IPFS')
+        else:
+            content = "Content could not be loaded from IPFS"
+    except Exception as e:
+        print(f"Error retrieving content for post {post_id}: {str(e)}")
+        content = "Error loading content from IPFS"
+    
     # Format post data
     post_data = {
         'id': post[0],
         'author': post[1],
         'title': post[2],
-        'content': post[3],
+        'content': content,
+        'ipfs_hash': post[3],
         'timestamp': post[4],
         'upvotes': post[5],
         'downvotes': post[6],

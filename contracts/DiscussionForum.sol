@@ -1,135 +1,143 @@
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 contract DiscussionForum {
-    // Struct for a post
+    // Post structure
     struct Post {
         uint256 id;
         address author;
         string title;
-        string content;
+        string contentHash; // IPFS hash instead of full content
         uint256 timestamp;
         uint256 upvotes;
         uint256 downvotes;
-        bool isNews; // Flag to indicate if this post is news content
+        bool isNews;
     }
-
-    // Struct for user reputation
+    
+    // User reputation structure
     struct UserReputation {
         uint256 totalPosts;
         uint256 totalUpvotesReceived;
         uint256 totalDownvotesReceived;
         uint256 totalUpvotesGiven;
         uint256 totalDownvotesGiven;
-        uint256 reputationScore; // Out of 1000 (divide by 100 for a score out of 10)
-        string sentimentTag; // "positive", "negative", or "neutral"
+        uint256 reputationScore;
+        string sentimentTag;
     }
-
-    // Post counter
-    uint256 public postCount;
-
-    // Mappings
-    mapping(uint256 => Post) public posts;
-    mapping(address => UserReputation) public userReputations;
-    mapping(uint256 => mapping(address => bool)) public hasVoted; // Track if a user has voted on a post
-    mapping(uint256 => mapping(address => bool)) public upvoted; // Track if a user upvoted a post
-    mapping(uint256 => mapping(address => bool)) public downvoted; // Track if a user downvoted a post
-
+    
     // Events
-    event PostCreated(uint256 indexed postId, address indexed author, string title, bool isNews);
+    event PostCreated(uint256 indexed postId, address indexed author, string title, bool isNews, string contentHash);
     event PostVoted(uint256 indexed postId, address indexed voter, bool isUpvote);
     event UserSentimentUpdated(address indexed user, string sentimentTag);
-
-    // Modifier to check if a post exists
-    modifier postExists(uint256 _postId) {
-        require(_postId > 0 && _postId <= postCount, "Post does not exist");
-        _;
-    }
-
-    // Initialize user reputation if not already
-    function initUserIfNeeded(address _user) internal {
-        if (userReputations[_user].reputationScore == 0) {
-            // Default reputation score is 500 (5.0 out of 10)
-            userReputations[_user].reputationScore = 500;
-            userReputations[_user].sentimentTag = "neutral";
-        }
-    }
-
+    
+    // Contract state variables
+    uint256 public postCount;
+    mapping(uint256 => Post) public posts;
+    mapping(address => UserReputation) public userReputations;
+    mapping(uint256 => mapping(address => bool)) public hasVoted;
+    mapping(uint256 => mapping(address => bool)) public upvoted;
+    mapping(uint256 => mapping(address => bool)) public downvoted;
+    
     // Create a new post
-    function createPost(string memory _title, string memory _content, bool _isNews) public {
-        initUserIfNeeded(msg.sender);
-        
+    function createPost(string memory _title, string memory _contentHash, bool _isNews) public {
+        // Increment post count
         postCount++;
-        posts[postCount] = Post({
-            id: postCount,
-            author: msg.sender,
-            title: _title,
-            content: _content,
-            timestamp: block.timestamp,
-            upvotes: 0,
-            downvotes: 0,
-            isNews: _isNews
-        });
         
-        // Update user reputation
+        // Create post
+        posts[postCount] = Post(
+            postCount,
+            msg.sender,
+            _title,
+            _contentHash,
+            block.timestamp,
+            0,
+            0,
+            _isNews
+        );
+        
+        // Update user's post count
         userReputations[msg.sender].totalPosts++;
         
-        emit PostCreated(postCount, msg.sender, _title, _isNews);
-    }
-
-    // Vote on a post
-    function votePost(uint256 _postId, bool _isUpvote) public postExists(_postId) {
-        initUserIfNeeded(msg.sender);
+        // Calculate reputation score (simple version)
+        calculateReputationScore(msg.sender);
         
-        // Check if the user has already voted on this post
-        require(!hasVoted[_postId][msg.sender], "You have already voted on this post");
+        // Emit event
+        emit PostCreated(postCount, msg.sender, _title, _isNews, _contentHash);
+    }
+    
+    // Vote on a post
+    function votePost(uint256 _postId, bool _isUpvote) public {
+        // Require valid post
+        require(_postId > 0 && _postId <= postCount, "Invalid post ID");
+        
+        // Require user has not voted on this post
+        require(!hasVoted[_postId][msg.sender], "User has already voted on this post");
+        
+        // Get post
+        Post storage post = posts[_postId];
         
         // Update post votes
         if (_isUpvote) {
-            posts[_postId].upvotes++;
+            post.upvotes++;
             upvoted[_postId][msg.sender] = true;
             userReputations[msg.sender].totalUpvotesGiven++;
-            
-            // Update author's reputation
-            address author = posts[_postId].author;
-            userReputations[author].totalUpvotesReceived++;
-            
-            // Increase reputation score (max 1000)
-            if (userReputations[author].reputationScore < 1000) {
-                uint256 increase = 10; // +0.1 per upvote
-                userReputations[author].reputationScore = min(1000, userReputations[author].reputationScore + increase);
-            }
+            userReputations[post.author].totalUpvotesReceived++;
         } else {
-            posts[_postId].downvotes++;
+            post.downvotes++;
             downvoted[_postId][msg.sender] = true;
             userReputations[msg.sender].totalDownvotesGiven++;
-            
-            // Update author's reputation
-            address author = posts[_postId].author;
-            userReputations[author].totalDownvotesReceived++;
-            
-            // Decrease reputation score (min 0)
-            if (userReputations[author].reputationScore > 0) {
-                uint256 decrease = 15; // -0.15 per downvote
-                userReputations[author].reputationScore = userReputations[author].reputationScore > decrease ? 
-                    userReputations[author].reputationScore - decrease : 0;
-            }
+            userReputations[post.author].totalDownvotesReceived++;
         }
         
-        // Mark user as having voted on this post
+        // Mark user as having voted
         hasVoted[_postId][msg.sender] = true;
         
+        // Calculate reputation scores
+        calculateReputationScore(post.author);
+        calculateReputationScore(msg.sender);
+        
+        // Emit event
         emit PostVoted(_postId, msg.sender, _isUpvote);
     }
-
-    // Update user sentiment tag (called from backend)
+    
+    // Calculate reputation score
+    function calculateReputationScore(address _user) internal {
+        // Get user reputation
+        UserReputation storage rep = userReputations[_user];
+        
+        // Calculate reputation score (out of 1000, to avoid floating point)
+        // Base score: 500 (5.0 out of 10)
+        uint256 score = 500;
+        
+        // Adjust based on votes received (more weight)
+        if (rep.totalUpvotesReceived + rep.totalDownvotesReceived > 0) {
+            uint256 voteRatio = (rep.totalUpvotesReceived * 1000) / (rep.totalUpvotesReceived + rep.totalDownvotesReceived);
+            // Weighted adjustment (60% of total score)
+            score = score + ((voteRatio - 500) * 6 / 10);
+        }
+        
+        // Adjust based on post count (less weight)
+        if (rep.totalPosts > 0) {
+            // Max bonus for posts: 100 (1.0 out of 10)
+            uint256 postBonus = rep.totalPosts * 10;
+            if (postBonus > 100) postBonus = 100;
+            score += postBonus;
+        }
+        
+        // Cap score between 0 and 1000
+        if (score > 1000) score = 1000;
+        if (score < 0) score = 0;
+        
+        // Update reputation score
+        rep.reputationScore = score;
+    }
+    
+    // Update user sentiment tag
     function updateUserSentiment(address _user, string memory _sentimentTag) public {
-        initUserIfNeeded(_user);
         userReputations[_user].sentimentTag = _sentimentTag;
         emit UserSentimentUpdated(_user, _sentimentTag);
     }
-
+    
     // Get user reputation data
     function getUserReputation(address _user) public view returns (
         uint256 totalPosts,
@@ -138,7 +146,7 @@ contract DiscussionForum {
         uint256 reputationScore,
         string memory sentimentTag
     ) {
-        UserReputation memory rep = userReputations[_user];
+        UserReputation storage rep = userReputations[_user];
         return (
             rep.totalPosts,
             rep.totalUpvotesReceived,
@@ -147,16 +155,12 @@ contract DiscussionForum {
             rep.sentimentTag
         );
     }
-
-    // Check if a user has voted on a specific post
-    function hasUserVoted(uint256 _postId, address _user) public view returns (bool voted, bool isUpvote) {
-        voted = hasVoted[_postId][_user];
-        isUpvote = upvoted[_postId][_user];
-        return (voted, isUpvote);
-    }
     
-    // Helper function for min value
-    function min(uint256 a, uint256 b) internal pure returns (uint256) {
-        return a < b ? a : b;
+    // Check if user has voted on a post
+    function hasUserVoted(uint256 _postId, address _user) public view returns (bool voted, bool isUpvote) {
+        if (hasVoted[_postId][_user]) {
+            return (true, upvoted[_postId][_user]);
+        }
+        return (false, false);
     }
 }
