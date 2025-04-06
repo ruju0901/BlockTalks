@@ -32,6 +32,15 @@ def index():
     # Format timestamps
     for post in posts:
         post['formatted_time'] = datetime.datetime.fromtimestamp(post['timestamp']).strftime('%Y-%m-%d %H:%M')
+        
+        # Ensure sentiment is set for news posts
+        if post.get('isNews') and not post.get('sentiment'):
+            try:
+                sentiment, polarity = analyze_sentiment(post['content'])
+                post['sentiment'] = sentiment
+                post['sentiment_score'] = polarity
+            except Exception as e:
+                print(f"Error analyzing sentiment: {str(e)}")
     
     return render_template('index.html', posts=posts, current_user=session.get('user_address'))
 
@@ -99,21 +108,39 @@ def create():
         # Get the logged-in user's address
         user_address = session.get('user_address')
         
-        # Create post on blockchain - IMPORTANT: Pass the user's address explicitly
-        post_id, _ = create_post(title, content, is_news, user_address=user_address)
+        # Create post on blockchain
+        post_id, result = create_post(title, content, is_news, user_address=user_address)
         
         if post_id:
             flash("Post created successfully")
             return redirect(url_for('post_detail', post_id=post_id))
         else:
-            flash("Failed to create post")
+            # Display error message
+            if isinstance(result, str):
+                flash(f"Failed to create post: {result}")
+            else:
+                flash("Failed to create post")
+            return redirect(url_for('create'))
     
     return render_template('create_post.html')
 
 @app.route('/post/<int:post_id>')
 def post_detail(post_id):
     post = get_post(post_id)
+    if not post:
+        flash("Post not found")
+        return redirect(url_for('index'))
+        
     post['formatted_time'] = datetime.datetime.fromtimestamp(post['timestamp']).strftime('%Y-%m-%d %H:%M')
+    
+    # Ensure sentiment is set for news posts
+    if post.get('isNews') and not post.get('sentiment'):
+        try:
+            sentiment, polarity = analyze_sentiment(post['content'])
+            post['sentiment'] = sentiment
+            post['sentiment_score'] = polarity
+        except Exception as e:
+            print(f"Error analyzing sentiment: {str(e)}")
     
     # Get author reputation
     author_reputation = get_user_reputation(post['author'])
@@ -143,7 +170,7 @@ def vote(post_id, vote_type):
     is_upvote = vote_type == 'up'
     user_address = session.get('user_address')
     
-    # Submit vote to blockchain - Pass the user's address explicitly
+    # Submit vote to blockchain
     success, message = vote_post(post_id, is_upvote, user_address=user_address)
     
     if success:
@@ -151,27 +178,46 @@ def vote(post_id, vote_type):
         
         # Update post author's sentiment if this is a news post
         post = get_post(post_id)
-        if post['isNews']:
+        if post and post['isNews']:
             user_posts = [p for p in get_all_posts() if p['author'] == post['author']]
             sentiment_tag = determine_user_sentiment(user_posts)
-            update_user_sentiment(post['author'], sentiment_tag, from_address=user_address)
+            result = update_user_sentiment(post['author'], sentiment_tag, from_address=user_address)
+            if isinstance(result, str):
+                flash(f"Note: {result}")
     else:
-        flash(message)
+        flash(f"Vote failed: {message}")
     
     return redirect(url_for('post_detail', post_id=post_id))
 
 @app.route('/user/<user_address>')
 def user_profile(user_address):
     # Get user reputation
-    reputation = get_user_reputation(user_address)
+    try:
+        reputation = get_user_reputation(user_address)
+    except Exception as e:
+        flash(f"Error getting user reputation: {str(e)}")
+        reputation = {
+            'totalPosts': 0,
+            'totalUpvotesReceived': 0,
+            'totalDownvotesReceived': 0,
+            'reputationScore': 5.0,
+            'sentimentTag': 'neutral'
+        }
     
     # Get user posts
     all_posts = get_all_posts()
     user_posts = [p for p in all_posts if p['author'].lower() == user_address.lower()]
     
-    # Format timestamps
+    # Format timestamps and ensure sentiment is set for news posts
     for post in user_posts:
         post['formatted_time'] = datetime.datetime.fromtimestamp(post['timestamp']).strftime('%Y-%m-%d %H:%M')
+        if post.get('isNews') and not post.get('sentiment'):
+            try:
+                sentiment, polarity = analyze_sentiment(post['content'])
+                post['sentiment'] = sentiment
+                post['sentiment_score'] = polarity
+            except Exception as e:
+                print(f"Error analyzing sentiment: {str(e)}")
     
     return render_template(
         'user_profile.html',

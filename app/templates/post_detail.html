@@ -31,14 +31,22 @@
             border-radius: 5px;
             margin-top: 20px;
         }
-        .badge-positive {
-            background-color: #28a745;
+        .bg-light-success {
+            background-color: rgba(40, 167, 69, 0.1);
         }
-        .badge-negative {
-            background-color: #dc3545;
+        .bg-light-danger {
+            background-color: rgba(220, 53, 69, 0.1);
         }
-        .badge-neutral {
-            background-color: #6c757d;
+        .bg-light-secondary {
+            background-color: rgba(108, 117, 125, 0.1);
+        }
+        .sentiment-indicator {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -46,7 +54,10 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand" href="/">Decentralized Forum</a>
-            <div class="collapse navbar-collapse">
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarContent">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
                         <a class="nav-link" href="/">Home</a>
@@ -85,7 +96,11 @@
                     {% endif %}
                 {% endwith %}
                 
-                <div class="card">
+                <div class="card {% if post.isNews and post.sentiment %}
+                        {% if post.sentiment == 'positive' %}bg-light-success{% 
+                        elif post.sentiment == 'negative' %}bg-light-danger{% 
+                        else %}bg-light-secondary{% endif %}
+                    {% endif %}">
                     <div class="card-body">
                         <div class="d-flex">
                             <div class="vote-buttons">
@@ -119,6 +134,19 @@
                                 <p class="text-muted">
                                     Posted by <a href="/user/{{ post.author }}">{{ post.author[:8] }}...</a> on {{ post.formatted_time }}
                                 </p>
+                                
+                                {% if post.isNews and post.sentiment %}
+                                    <div class="sentiment-indicator 
+                                        {% if post.sentiment == 'positive' %}bg-success text-white{% 
+                                        elif post.sentiment == 'negative' %}bg-danger text-white{% 
+                                        else %}bg-secondary text-white{% endif %}">
+                                        Sentiment: {{ post.sentiment|capitalize }}
+                                        {% if post.sentiment_score %}
+                                            ({{ "%.2f"|format(post.sentiment_score) }})
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
+                                
                                 <div class="card-text mt-4">
                                     {{ post.content|replace('\n', '<br>')|safe }}
                                 </div>
@@ -141,7 +169,9 @@
                                     </p>
                                     <p>
                                         <strong>Sentiment:</strong>
-                                        <span class="badge badge-{{ author_reputation.sentimentTag }}">
+                                        <span class="badge {% if author_reputation.sentimentTag == 'positive' %}bg-success{% 
+                                            elif author_reputation.sentimentTag == 'negative' %}bg-danger{% 
+                                            else %}bg-secondary{% endif %}">
                                             {{ author_reputation.sentimentTag|capitalize }}
                                         </span>
                                     </p>
